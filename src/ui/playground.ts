@@ -1,59 +1,61 @@
 import { LitElement, css, html } from "lit";
-import {
-  generateDataset,
-  type DatasetName,
-  type Point,
-  pointsToMatrices
-} from "../data/datasets.js";
-import {
-  createMlp,
-  predictProba,
-  setLearningRate,
-  trainStep,
-  type Mlp
-} from "../net/mlp.js";
-import { createMatrix } from "../net/matrix.js";
-import "./net-canvas.js";
-import "./loss-chart.js";
+import { generateMaze, step, type Maze, type Position } from "../maze/index.js";
+import { QAgent, DEFAULT_QL_CONFIG } from "../rl/qlearning.js";
+import "./maze-canvas.js";
 
-const DEFAULT_DATASET: DatasetName = "moons";
-const DEFAULT_HIDDEN = 8;
-const DEFAULT_DEPTH = 2;
-const DEFAULT_LR = 0.15;
-const EPOCHS_PER_FRAME = 4;
-const MAX_LOSS_HISTORY = 400;
+const DEFAULT_SIZE = 21;
+const SUCCESS_FOR_PLAYBACK = 8;
 
 export class LpPlayground extends LitElement {
   static properties = {
-    datasetName: { state: true },
-    points: { state: true },
-    paintClass: { state: true },
-    hiddenSize: { state: true },
-    hiddenDepth: { state: true },
-    learningRate: { state: true },
+    mazeSize: { state: true },
     training: { state: true },
-    epoch: { state: true },
-    loss: { state: true },
-    acc: { state: true },
-    losses: { state: true },
-    boundaryVersion: { state: true }
+    playback: { state: true },
+    alpha: { state: true },
+    gamma: { state: true },
+    epsilonStart: { state: true },
+    speed: { state: true },
+    showHeatmap: { state: true },
+    episode: { state: true },
+    steps: { state: true },
+    totalReward: { state: true },
+    epsilon: { state: true },
+    successRate: { state: true },
+    statusMsg: { state: true },
+    agentPos: { state: true },
+    startPos: { state: true },
+    heatmapVersion: { state: true }
   };
 
-  declare datasetName: DatasetName;
-  declare points: Point[];
-  declare paintClass: 0 | 1;
-  declare hiddenSize: number;
-  declare hiddenDepth: number;
-  declare learningRate: number;
+  declare mazeSize: number;
   declare training: boolean;
-  declare epoch: number;
-  declare loss: number;
-  declare acc: number;
-  declare losses: number[];
-  declare boundaryVersion: number;
+  declare playback: boolean;
+  declare alpha: number;
+  declare gamma: number;
+  declare epsilonStart: number;
+  declare speed: number;
+  declare showHeatmap: boolean;
+  declare episode: number;
+  declare steps: number;
+  declare totalReward: number;
+  declare epsilon: number;
+  declare successRate: number;
+  declare statusMsg: string;
+  declare agentPos: Position | null;
+  declare startPos: Position | null;
+  declare heatmapVersion: number;
 
-  private mlp: Mlp;
+  private maze: Maze;
+  private agent: QAgent;
   private rafId: number | null = null;
+  private heatmap = new Float64Array(0);
+  private heatmapMax = 1;
+  private episodeReward = 0;
+  private episodeSteps = 0;
+  private betweenEpisodes = false;
+  private consecutiveSuccesses = 0;
+  private playbackPath: Position[] = [];
+  private playbackIndex = 0;
 
   static styles = css`
     :host {
@@ -100,16 +102,22 @@ export class LpPlayground extends LitElement {
       padding: 8px 12px;
       cursor: pointer;
     }
-    button:hover,
-    select:hover {
+    button:hover:not(:disabled) {
       background: var(--lp-btn-hover, #243552);
     }
-    button.primary {
-      background: color-mix(in srgb, var(--lp-accent, #5b9dff) 35%, var(--lp-btn, #1b2a44));
-      border-color: var(--lp-accent, #5b9dff);
+    button:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
     }
-    button.danger {
-      border-color: var(--lp-danger, #ff6b8a);
+    button.primary {
+      background: var(--lp-accent, #5b9dff);
+      border-color: transparent;
+      color: #061018;
+      font-weight: 600;
+    }
+    button.primary:hover:not(:disabled) {
+      filter: brightness(1.08);
+      background: var(--lp-accent, #5b9dff);
     }
     .row {
       display: flex;
@@ -117,169 +125,126 @@ export class LpPlayground extends LitElement {
       gap: 8px;
       margin-top: 12px;
     }
-    .readouts {
+    .stats {
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
+      grid-template-columns: 1fr 1fr;
       gap: 8px;
-      margin-top: 14px;
+      margin-top: 12px;
+      font-size: 0.85rem;
     }
     .stat {
-      background: color-mix(in srgb, var(--lp-bg, #070b14) 50%, transparent);
+      background: rgba(0, 0, 0, 0.2);
       border-radius: 8px;
-      padding: 8px;
-      text-align: center;
-    }
-    .stat .v {
-      font-variant-numeric: tabular-nums;
-      font-weight: 700;
-      font-size: 1.05rem;
+      padding: 8px 10px;
     }
     .stat .k {
-      font-size: 0.72rem;
       color: var(--lp-muted, #9aa8bc);
+      font-size: 0.72rem;
       text-transform: uppercase;
       letter-spacing: 0.04em;
     }
-    .paint-toggle {
-      display: flex;
-      gap: 8px;
-      margin-top: 4px;
-    }
-    .paint-toggle button[aria-pressed="true"] {
-      outline: 2px solid var(--lp-accent, #5b9dff);
-    }
-    .paint-a[aria-pressed="true"] {
-      outline-color: var(--lp-class-a, #5b9dff) !important;
-    }
-    .paint-b[aria-pressed="true"] {
-      outline-color: var(--lp-class-b, #ff6b8a) !important;
-    }
-    .value {
-      font-size: 0.85rem;
-      color: var(--lp-muted, #9aa8bc);
-    }
-    .viz {
-      display: flex;
-      flex-direction: column;
-      gap: 16px;
+    .stat .v {
+      font-variant-numeric: tabular-nums;
+      font-weight: 600;
     }
     .edu {
-      margin-top: 16px;
-      font-size: 0.88rem;
+      margin-top: 14px;
+      font-size: 0.82rem;
       color: var(--lp-muted, #9aa8bc);
+      line-height: 1.5;
     }
     .edu strong {
       color: var(--lp-text, #e8eef7);
     }
-    .edu code {
-      font-size: 0.84em;
-    }
-    .arch {
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    .status {
+      margin-top: 10px;
       font-size: 0.85rem;
-      margin-top: 4px;
+      color: var(--lp-accent, #5b9dff);
+      min-height: 1.3em;
+    }
+    input[type="range"] {
+      width: 100%;
+    }
+    .val {
+      float: right;
+      color: var(--lp-text, #e8eef7);
+      font-variant-numeric: tabular-nums;
+    }
+    .check {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 12px;
+      font-size: 0.85rem;
+      color: var(--lp-muted, #9aa8bc);
+    }
+    .check input {
+      accent-color: var(--lp-accent, #5b9dff);
     }
   `;
 
   constructor() {
     super();
-    this.datasetName = DEFAULT_DATASET;
-    this.points = [];
-    this.paintClass = 0;
-    this.hiddenSize = DEFAULT_HIDDEN;
-    this.hiddenDepth = DEFAULT_DEPTH;
-    this.learningRate = DEFAULT_LR;
+    this.mazeSize = DEFAULT_SIZE;
     this.training = false;
-    this.epoch = 0;
-    this.loss = 0;
-    this.acc = 0;
-    this.losses = [];
-    this.boundaryVersion = 0;
-    this.mlp = this.buildMlp();
-  }
+    this.playback = false;
+    this.alpha = DEFAULT_QL_CONFIG.alpha;
+    this.gamma = DEFAULT_QL_CONFIG.gamma;
+    this.epsilonStart = DEFAULT_QL_CONFIG.epsilon;
+    this.speed = 8;
+    this.showHeatmap = true;
+    this.episode = 0;
+    this.steps = 0;
+    this.totalReward = 0;
+    this.epsilon = DEFAULT_QL_CONFIG.epsilon;
+    this.successRate = 0;
+    this.statusMsg = "Generate a maze, then click a cell to place the ball.";
+    this.agentPos = null;
+    this.startPos = null;
+    this.heatmapVersion = 0;
 
-  connectedCallback(): void {
-    super.connectedCallback();
-    if (this.points.length === 0) {
-      this.resetData(DEFAULT_DATASET);
-    }
+    this.maze = generateMaze({ size: this.mazeSize });
+    this.agent = this.makeAgent();
+    this.rebuildHeatmap();
   }
 
   disconnectedCallback(): void {
-    this.stopLoop();
     super.disconnectedCallback();
+    this.stopLoop();
   }
 
-  private sizes(): number[] {
-    const hidden = Array.from({ length: this.hiddenDepth }, () => this.hiddenSize);
-    return [2, ...hidden, 1];
-  }
-
-  private buildMlp(): Mlp {
-    return createMlp({
-      sizes: this.sizes(),
-      learningRate: this.learningRate,
-      seed: 42 + this.hiddenSize * 17 + this.hiddenDepth
+  private makeAgent(): QAgent {
+    return new QAgent(this.maze, {
+      alpha: this.alpha,
+      gamma: this.gamma,
+      epsilon: this.epsilonStart,
+      epsilonDecay: 0.995,
+      epsilonMin: 0.05,
+      maxSteps: Math.max(200, this.maze.rows * this.maze.cols * 2)
     });
   }
 
-  private resetData(name: DatasetName): void {
-    this.datasetName = name;
-    this.points = generateDataset(name, 120);
-    this.resetNet();
+  private rebuildHeatmap(): void {
+    const n = this.maze.rows * this.maze.cols;
+    this.heatmap = new Float64Array(n);
+    let max = 0;
+    for (let i = 0; i < n; i++) {
+      if (this.maze.walls[i]) continue;
+      const row = Math.floor(i / this.maze.cols);
+      const col = i % this.maze.cols;
+      const v = Math.max(0, this.agent.maxQ({ row, col }));
+      this.heatmap[i] = v;
+      if (v > max) max = v;
+    }
+    this.heatmapMax = max || 1;
+    this.heatmapVersion++;
   }
 
-  private resetNet(): void {
-    this.stopLoop();
-    this.training = false;
-    this.mlp = this.buildMlp();
-    this.epoch = 0;
-    this.loss = 0;
-    this.acc = 0;
-    this.losses = [];
-    this.boundaryVersion++;
+  private syncStats(): void {
+    this.episode = this.agent.episode;
+    this.epsilon = this.agent.epsilon;
+    this.successRate = this.agent.successRate();
   }
-
-  private onDataset = (e: Event): void => {
-    const name = (e.target as HTMLSelectElement).value as DatasetName;
-    this.resetData(name);
-  };
-
-  private onHiddenSize = (e: Event): void => {
-    this.hiddenSize = Number((e.target as HTMLInputElement).value);
-    this.resetNet();
-  };
-
-  private onHiddenDepth = (e: Event): void => {
-    this.hiddenDepth = Number((e.target as HTMLInputElement).value);
-    this.resetNet();
-  };
-
-  private onLr = (e: Event): void => {
-    this.learningRate = Number((e.target as HTMLInputElement).value);
-    setLearningRate(this.mlp, this.learningRate);
-  };
-
-  private onAddPoint = (e: Event): void => {
-    const detail = (e as CustomEvent<Point>).detail;
-    this.points = [...this.points, detail];
-  };
-
-  private clearPoints = (): void => {
-    this.points = [];
-    this.resetNet();
-  };
-
-  private startTrain = (): void => {
-    if (this.points.length < 2) return;
-    this.training = true;
-    this.loop();
-  };
-
-  private pauseTrain = (): void => {
-    this.training = false;
-    this.stopLoop();
-  };
 
   private stopLoop(): void {
     if (this.rafId !== null) {
@@ -288,169 +253,404 @@ export class LpPlayground extends LitElement {
     }
   }
 
-  private loop = (): void => {
-    if (!this.training) return;
-    this.trainBatches(EPOCHS_PER_FRAME);
-    this.rafId = requestAnimationFrame(this.loop);
-  };
-
-  private trainBatches(n: number): void {
-    if (this.points.length === 0) return;
-    const { inputs, targets, rows } = pointsToMatrices(this.points);
-    const inputM = createMatrix(rows, 2);
-    inputM.data.set(inputs);
-    const targetM = createMatrix(rows, 1);
-    targetM.data.set(targets);
-
-    let lastLoss = this.loss;
-    let lastAcc = this.acc;
-    const newLosses = [...this.losses];
-
-    for (let i = 0; i < n; i++) {
-      const result = trainStep(this.mlp, inputM, targetM, "bce");
-      lastLoss = result.loss;
-      lastAcc = result.accuracy;
-      this.epoch += 1;
-      newLosses.push(lastLoss);
-    }
-    while (newLosses.length > MAX_LOSS_HISTORY) newLosses.shift();
-
-    this.loss = lastLoss;
-    this.acc = lastAcc;
-    this.losses = newLosses;
-    this.boundaryVersion++;
+  private startLoop(): void {
+    this.stopLoop();
+    const tick = (): void => {
+      this.rafId = null;
+      if (!this.training && !this.playback) return;
+      this.frame();
+      if (this.training || this.playback) {
+        this.rafId = requestAnimationFrame(tick);
+      }
+    };
+    this.rafId = requestAnimationFrame(tick);
   }
 
-  private sampleBoundary = (x: number, y: number): number => {
-    void this.boundaryVersion;
-    const scores = predictProba(this.mlp, [[x, y]]);
-    return scores[0] ?? 0.5;
+  private frame(): void {
+    if (this.playback) {
+      this.playbackFrame();
+      return;
+    }
+    if (!this.training || !this.startPos || !this.agentPos) return;
+    if (this.betweenEpisodes) return;
+
+    const stepsThisFrame = Math.max(1, Math.round(this.speed));
+    for (let i = 0; i < stepsThisFrame; i++) {
+      if (!this.agentPos || !this.startPos) break;
+      const result = this.agent.takeStep(this.agentPos, false);
+      this.agentPos = result.next;
+      this.episodeReward += result.reward;
+      this.episodeSteps += 1;
+      this.steps = this.episodeSteps;
+      this.totalReward = this.episodeReward;
+
+      const timedOut = this.episodeSteps >= this.agent.config.maxSteps;
+      if (result.done || timedOut) {
+        this.agent.endEpisode(result.done);
+        this.syncStats();
+        this.rebuildHeatmap();
+        if (result.done) {
+          this.consecutiveSuccesses += 1;
+          this.statusMsg = `Reached exit in ${this.episodeSteps} steps (episode ${this.agent.episode}).`;
+        } else {
+          this.consecutiveSuccesses = 0;
+          this.statusMsg = `Episode ${this.agent.episode} timed out after ${this.episodeSteps} steps.`;
+        }
+
+        if (
+          this.consecutiveSuccesses >= SUCCESS_FOR_PLAYBACK &&
+          this.agent.successRate() >= 0.7
+        ) {
+          this.offerPlayback();
+          return;
+        }
+
+        this.betweenEpisodes = true;
+        window.setTimeout(() => {
+          this.betweenEpisodes = false;
+          if (this.startPos && this.training) {
+            this.agentPos = { ...this.startPos };
+            this.episodeReward = 0;
+            this.episodeSteps = 0;
+            this.steps = 0;
+            this.totalReward = 0;
+            this.requestUpdate();
+          }
+        }, 280);
+        break;
+      }
+    }
+    this.syncStats();
+    if (this.episodeSteps % 8 === 0) {
+      this.rebuildHeatmap();
+    }
+    this.requestUpdate();
+  }
+
+  private offerPlayback(): void {
+    this.training = false;
+    this.statusMsg =
+      "Looking solid — running a greedy (ε=0) playback of the learned path.";
+    this.startPlayback();
+  }
+
+  private startPlayback(): void {
+    if (!this.startPos) return;
+    this.playbackPath = this.computeGreedyPath(this.startPos);
+    this.playbackIndex = 0;
+    this.agentPos = { ...this.playbackPath[0]! };
+    this.playback = true;
+    this.steps = 0;
+    this.totalReward = 0;
+    this.startLoop();
+  }
+
+  /** Walk ε=0 policy without writing to the Q-table (display only). */
+  private computeGreedyPath(start: Position): Position[] {
+    const path: Position[] = [{ ...start }];
+    let pos = { ...start };
+    const seen = new Set<string>();
+    for (let i = 0; i < this.agent.config.maxSteps; i++) {
+      const key = `${pos.row},${pos.col}`;
+      if (seen.has(key)) break;
+      seen.add(key);
+      const action = this.agent.bestAction(pos);
+      const result = step(this.maze, pos, action);
+      pos = result.next;
+      path.push({ ...pos });
+      if (result.done) break;
+      if (result.hitWall) break;
+    }
+    return path;
+  }
+
+  private playbackFrame(): void {
+    if (this.playbackIndex >= this.playbackPath.length - 1) {
+      this.playback = false;
+      this.statusMsg =
+        "Greedy playback finished. Hit Train to keep improving, or Reset learning.";
+      this.stopLoop();
+      this.requestUpdate();
+      return;
+    }
+    const advance = Math.max(1, Math.round(this.speed / 4));
+    this.playbackIndex = Math.min(
+      this.playbackPath.length - 1,
+      this.playbackIndex + advance
+    );
+    this.agentPos = { ...this.playbackPath[this.playbackIndex]! };
+    this.steps = this.playbackIndex;
+    this.requestUpdate();
+  }
+
+  private onNewMaze = (): void => {
+    this.training = false;
+    this.playback = false;
+    this.stopLoop();
+    this.maze = generateMaze({ size: this.mazeSize });
+    this.agent = this.makeAgent();
+    this.startPos = null;
+    this.agentPos = null;
+    this.consecutiveSuccesses = 0;
+    this.betweenEpisodes = false;
+    this.episodeReward = 0;
+    this.episodeSteps = 0;
+    this.steps = 0;
+    this.totalReward = 0;
+    this.syncStats();
+    this.rebuildHeatmap();
+    this.statusMsg = "New maze — click an open cell to place the ball (Q-table reset).";
+    this.requestUpdate();
+  };
+
+  private onCellClick = (ev: Event): void => {
+    const detail = (ev as CustomEvent<{ position: Position }>).detail;
+    if (!detail?.position) return;
+    this.training = false;
+    this.playback = false;
+    this.stopLoop();
+    this.startPos = { ...detail.position };
+    this.agentPos = { ...detail.position };
+    // Prefer reset Q-table on new start so learning is visible from scratch.
+    this.agent = this.makeAgent();
+    this.consecutiveSuccesses = 0;
+    this.betweenEpisodes = false;
+    this.episodeReward = 0;
+    this.episodeSteps = 0;
+    this.steps = 0;
+    this.totalReward = 0;
+    this.syncStats();
+    this.rebuildHeatmap();
+    this.statusMsg =
+      "Ball placed — hit Train to watch Q-learning explore and improve.";
+    this.requestUpdate();
+  };
+
+  private onTrain = (): void => {
+    if (!this.startPos) {
+      this.statusMsg = "Click an open cell first to place the ball.";
+      return;
+    }
+    this.playback = false;
+    this.training = true;
+    this.betweenEpisodes = false;
+    if (!this.agentPos) this.agentPos = { ...this.startPos };
+    this.statusMsg = "Training… explore (ε) vs exploit; heatmap shows max Q per cell.";
+    this.startLoop();
+    this.requestUpdate();
+  };
+
+  private onPause = (): void => {
+    this.training = false;
+    this.playback = false;
+    this.stopLoop();
+    this.statusMsg = "Paused.";
+    this.requestUpdate();
+  };
+
+  private onResetLearning = (): void => {
+    this.training = false;
+    this.playback = false;
+    this.stopLoop();
+    this.agent.resetLearning();
+    this.agent.config.alpha = this.alpha;
+    this.agent.config.gamma = this.gamma;
+    this.agent.config.epsilon = this.epsilonStart;
+    this.agent.epsilon = this.epsilonStart;
+    this.consecutiveSuccesses = 0;
+    this.betweenEpisodes = false;
+    this.episodeReward = 0;
+    this.episodeSteps = 0;
+    this.steps = 0;
+    this.totalReward = 0;
+    if (this.startPos) this.agentPos = { ...this.startPos };
+    this.syncStats();
+    this.rebuildHeatmap();
+    this.statusMsg = "Learning reset (Q-table cleared). Maze and start kept.";
+    this.requestUpdate();
+  };
+
+  private onPlayback = (): void => {
+    if (!this.startPos) {
+      this.statusMsg = "Place the ball first.";
+      return;
+    }
+    this.training = false;
+    this.statusMsg = "Greedy playback (ε=0)…";
+    this.startPlayback();
+    this.requestUpdate();
+  };
+
+  private onSizeChange = (ev: Event): void => {
+    this.mazeSize = Number((ev.target as HTMLSelectElement).value);
+    this.onNewMaze();
+  };
+
+  private onAlpha = (ev: Event): void => {
+    this.alpha = Number((ev.target as HTMLInputElement).value);
+    this.agent.config.alpha = this.alpha;
+  };
+
+  private onGamma = (ev: Event): void => {
+    this.gamma = Number((ev.target as HTMLInputElement).value);
+    this.agent.config.gamma = this.gamma;
+  };
+
+  private onEpsilonStart = (ev: Event): void => {
+    this.epsilonStart = Number((ev.target as HTMLInputElement).value);
+  };
+
+  private onSpeed = (ev: Event): void => {
+    this.speed = Number((ev.target as HTMLInputElement).value);
+  };
+
+  private onHeatmapToggle = (ev: Event): void => {
+    this.showHeatmap = (ev.target as HTMLInputElement).checked;
   };
 
   render() {
+    const pct = (this.successRate * 100).toFixed(0);
     return html`
       <div class="layout">
         <aside class="panel">
-          <h2>Controls</h2>
+          <h2>Maze &amp; training</h2>
 
-          <label for="dataset">Dataset</label>
-          <select id="dataset" @change=${this.onDataset} .value=${this.datasetName}>
-            <option value="moons">Two moons</option>
-            <option value="xor">XOR blobs</option>
-            <option value="circles">Concentric circles</option>
+          <label>Maze size</label>
+          <select @change=${this.onSizeChange} .value=${String(this.mazeSize)}>
+            <option value="11">11 × 11</option>
+            <option value="15">15 × 15</option>
+            <option value="21">21 × 21</option>
+            <option value="31">31 × 31</option>
           </select>
 
-          <label>Paint class</label>
-          <div class="paint-toggle">
+          <div class="row">
+            <button type="button" @click=${this.onNewMaze}>New maze</button>
             <button
-              class="paint-a"
-              aria-pressed=${String(this.paintClass === 0)}
-              @click=${() => {
-                this.paintClass = 0;
-              }}
+              type="button"
+              class="primary"
+              @click=${this.onTrain}
+              ?disabled=${!this.startPos || this.training}
             >
-              Class A
+              Train
             </button>
             <button
-              class="paint-b"
-              aria-pressed=${String(this.paintClass === 1)}
-              @click=${() => {
-                this.paintClass = 1;
-              }}
+              type="button"
+              @click=${this.onPause}
+              ?disabled=${!this.training && !this.playback}
             >
-              Class B
+              Pause
+            </button>
+            <button type="button" @click=${this.onResetLearning}>Reset learning</button>
+            <button type="button" @click=${this.onPlayback} ?disabled=${!this.startPos}>
+              Greedy play
             </button>
           </div>
 
-          <label for="hidden">Hidden size: <span class="value">${this.hiddenSize}</span></label>
+          <label>Speed <span class="val">${this.speed} steps/frame</span></label>
           <input
-            id="hidden"
-            type="range"
-            min="2"
-            max="32"
-            step="1"
-            .value=${String(this.hiddenSize)}
-            @input=${this.onHiddenSize}
-          />
-
-          <label for="depth">Hidden layers: <span class="value">${this.hiddenDepth}</span></label>
-          <input
-            id="depth"
             type="range"
             min="1"
-            max="3"
+            max="40"
             step="1"
-            .value=${String(this.hiddenDepth)}
-            @input=${this.onHiddenDepth}
+            .value=${String(this.speed)}
+            @input=${this.onSpeed}
           />
 
-          <div class="arch">Architecture: [${this.sizes().join(", ")}]</div>
+          <label>Learning rate α <span class="val">${this.alpha.toFixed(2)}</span></label>
+          <input
+            type="range"
+            min="0.05"
+            max="0.8"
+            step="0.01"
+            .value=${String(this.alpha)}
+            @input=${this.onAlpha}
+          />
 
-          <label for="lr"
-            >Learning rate: <span class="value">${this.learningRate.toFixed(2)}</span></label
+          <label>Discount γ <span class="val">${this.gamma.toFixed(2)}</span></label>
+          <input
+            type="range"
+            min="0.5"
+            max="0.99"
+            step="0.01"
+            .value=${String(this.gamma)}
+            @input=${this.onGamma}
+          />
+
+          <label
+            >ε start (resets on new start/maze)
+            <span class="val">${this.epsilonStart.toFixed(2)}</span></label
           >
           <input
-            id="lr"
             type="range"
-            min="0.01"
+            min="0.1"
             max="1"
-            step="0.01"
-            .value=${String(this.learningRate)}
-            @input=${this.onLr}
+            step="0.05"
+            .value=${String(this.epsilonStart)}
+            @input=${this.onEpsilonStart}
           />
 
-          <div class="row">
-            ${this.training
-              ? html`<button class="danger" @click=${this.pauseTrain}>Pause</button>`
-              : html`<button class="primary" @click=${this.startTrain}>Train</button>`}
-            <button @click=${() => this.resetNet()}>Reset net</button>
-            <button @click=${() => this.resetData(this.datasetName)}>Reload data</button>
-            <button @click=${this.clearPoints}>Clear points</button>
+          <label class="check">
+            <input
+              type="checkbox"
+              .checked=${this.showHeatmap}
+              @change=${this.onHeatmapToggle}
+            />
+            Show Q-value heatmap
+          </label>
+
+          <div class="stats">
+            <div class="stat">
+              <div class="k">Episode</div>
+              <div class="v">${this.episode}</div>
+            </div>
+            <div class="stat">
+              <div class="k">Steps</div>
+              <div class="v">${this.steps}</div>
+            </div>
+            <div class="stat">
+              <div class="k">Episode reward</div>
+              <div class="v">${this.totalReward.toFixed(1)}</div>
+            </div>
+            <div class="stat">
+              <div class="k">Epsilon ε</div>
+              <div class="v">${this.epsilon.toFixed(3)}</div>
+            </div>
+            <div class="stat">
+              <div class="k">Success (last 50)</div>
+              <div class="v">${pct}%</div>
+            </div>
+            <div class="stat">
+              <div class="k">Mode</div>
+              <div class="v">
+                ${this.playback ? "Playback" : this.training ? "Training" : "Idle"}
+              </div>
+            </div>
           </div>
 
-          <div class="readouts">
-            <div class="stat">
-              <div class="v">${this.epoch}</div>
-              <div class="k">Epoch</div>
-            </div>
-            <div class="stat">
-              <div class="v">${this.loss.toFixed(3)}</div>
-              <div class="k">Loss</div>
-            </div>
-            <div class="stat">
-              <div class="v">${(this.acc * 100).toFixed(0)}%</div>
-              <div class="k">Accuracy</div>
-            </div>
-          </div>
+          <div class="status">${this.statusMsg}</div>
 
           <div class="edu">
-            <p>
-              <strong>Forward pass</strong> — each layer computes
-              <code>activation(xW + b)</code>. Hidden layers use ReLU; the output uses sigmoid so
-              predictions stay in (0, 1).
-            </p>
-            <p>
-              <strong>Loss</strong> — binary cross-entropy measures how wrong the predicted
-              probabilities are versus the true labels (0 or 1).
-            </p>
-            <p>
-              <strong>Backprop</strong> — gradients of the loss w.r.t. every weight are computed with
-              the chain rule, then SGD nudges weights opposite the gradient so the next forward pass
-              is a little better.
-            </p>
+            <strong>What is going on?</strong>
+            The agent uses <strong>tabular Q-learning</strong>: for every cell and move
+            (N/E/S/W) it stores a value Q. It mostly <em>explores</em> at random when ε is
+            high, then <em>exploits</em> the best Q as ε decays. Reaching the green exit
+            gives a big reward; each step costs a little; bumping a wall is penalized.
+            New maze or a new start click <strong>resets the Q-table</strong> so you can
+            watch learning from scratch. The heatmap colors cells by their max Q.
           </div>
         </aside>
 
-        <div class="viz">
-          <lp-net-canvas
-            .points=${this.points}
-            .paintClass=${this.paintClass}
-            .sampleBoundary=${this.sampleBoundary}
-            .resolution=${40}
-            @add-point=${this.onAddPoint}
-          ></lp-net-canvas>
-          <lp-loss-chart .losses=${this.losses}></lp-loss-chart>
-        </div>
+        <section>
+          <lp-maze-canvas
+            .maze=${this.maze}
+            .agent=${this.agentPos}
+            .start=${this.startPos}
+            .heatmap=${this.heatmap}
+            .heatmapMax=${this.heatmapMax}
+            .showHeatmap=${this.showHeatmap}
+            @cell-click=${this.onCellClick}
+          ></lp-maze-canvas>
+        </section>
       </div>
     `;
   }

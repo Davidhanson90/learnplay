@@ -11,12 +11,13 @@ This repository is a **demo app** (not an npm library).
 ## Rules
 
 1. Do not edit `dist/` directly.
-2. Keep the MLP pure TypeScript — no TensorFlow.js / remote training APIs.
-3. Preserve Lit custom element tags `lp-playground`, `lp-net-canvas`, `lp-loss-chart` unless intentionally changing API.
+2. Keep learning pure TypeScript — tabular Q-learning only (no TF.js / remote RL APIs / A* as the “learning” demo).
+3. Preserve Lit custom element tags `lp-playground` and `lp-maze-canvas` unless intentionally changing API.
 4. Vite `base` must stay `/learnplay/` so GitHub Pages works at `https://davidhanson90.github.io/learnplay/`.
 5. Run `npm run build:verify` before proposing completion.
+6. New maze or new start click should **reset the Q-table** so learning is visible from scratch.
 
 ## Coverage
 
-- Vitest coverage thresholds apply to `src/net/**` and `src/data/**`.
+- Vitest coverage thresholds apply to `src/maze/**` and `src/rl/**`.
 - Lit UI under `src/ui/**` is excluded from coverage thresholds.

@@ -1,7 +1,7 @@
 {
   "name": "learnplay",
-  "version": "0.1.0",
-  "description": "Browser-only neural net playground: train a tiny MLP on 2D toy datasets and watch learning live.",
+  "version": "0.2.0",
+  "description": "Browser-only maze-solver learning demo: watch tabular Q-learning find the exit.",
   "type": "module",
   "private": true,
   "scripts": {
@@ -18,14 +18,15 @@
     "test:watch": "vitest"
   },
   "keywords": [
-    "neural-network",
+    "q-learning",
+    "reinforcement-learning",
+    "maze",
     "machine-learning",
     "lit",
     "web-components",
     "typescript",
     "education",
-    "demo",
-    "mlp"
+    "demo"
   ],
   "repository": {
     "type": "git",

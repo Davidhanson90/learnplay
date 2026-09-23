@@ -1,19 +1,27 @@
 # learnplay
 
-A browser-only **neural net playground**. Train a tiny multilayer perceptron on 2D toy datasets and watch learning happen live — decision boundary, loss curve, epoch / loss / accuracy readouts.
+A browser-only **maze-solver learning demo**. Generate a random maze, click to place a ball, hit **Train**, and watch **tabular Q-learning** explore, improve, and eventually find the exit — with a live Q-value heatmap.
 
 **Live demo:** [https://davidhanson90.github.io/learnplay/](https://davidhanson90.github.io/learnplay/)
 
-No TensorFlow.js, no API keys, no backend. The network is a few hundred lines of typed TypeScript.
+No TensorFlow.js, no API keys, no backend. Pure TypeScript + Lit + Vite.
 
 ## What you can learn by playing
 
-- How a **forward pass** turns coordinates into a class probability
-- What **binary cross-entropy loss** looks like as it falls over epochs
-- How **backpropagation + SGD** reshape the decision boundary
-- Why **hidden layer size / depth** and **learning rate** change what the net can fit (moons, XOR blobs, concentric circles)
+- How **Q-learning** stores a value for every (cell, move) pair
+- **Explore vs exploit**: high ε → random moves; decaying ε → follow the best Q
+- Rewards: big bonus for the exit, small step cost, wall bump penalty
+- Why a **heatmap of max Q** lights up the useful corridors as the agent learns
+- Resetting the Q-table (new maze / new start) makes learning visible from scratch again
 
-Click the canvas to add your own Class A / Class B points and see if the net can catch up.
+## How to use
+
+1. Open the demo (or `npm start` locally)
+2. Optionally change maze size, then **New maze**
+3. **Click an open cell** to place the ball (start). This resets the Q-table.
+4. Hit **Train** — the ball runs episodes; watch episode count, ε, success rate, and heatmap
+5. After several successes, the demo may auto-run a **greedy (ε=0) playback**; you can also click **Greedy play**
+6. **Pause** / **Reset learning** as needed
 
 ## Quick start
 
@@ -33,21 +41,21 @@ npm run build      # typecheck + production Vite build → dist/
 npm run build:verify
 ```
 
-## Features (v1)
+## Features
 
-1. Switchable toy datasets: **two moons**, **XOR blobs**, **concentric circles**
-2. Click-to-add points with Class A / Class B paint toggle
-3. Network config: hidden size, depth, learning rate (ReLU hidden + sigmoid output)
-4. Train / Pause / Reset; training runs in `requestAnimationFrame` batches
-5. Live decision-boundary heatmap + loss chart
-6. Epoch, loss, and accuracy readouts
-7. Short in-UI notes on forward pass, loss, and backprop
+1. Perfect grid mazes (recursive backtracker) with one exit
+2. Click-to-place agent; New maze regenerates + resets learning
+3. Tabular Q-learning with tunable α, γ, ε start, and training speed
+4. Live ball animation, episode stats, rolling success rate
+5. Q-value heatmap overlay
+6. Optional / auto greedy playback of the learned path
+7. Short in-UI notes on explore/exploit and rewards
 
 ## Tech stack
 
 - TypeScript + Vite
 - Lit web components
-- From-scratch MLP (matrix helpers, dense layers, BCE, SGD)
+- From-scratch maze generation + tabular Q-learning
 - Vitest + ESLint
 - GitHub Actions → verify on `main` + deploy `dist/` to GitHub Pages
 
@@ -55,9 +63,9 @@ npm run build:verify
 
 ```
 src/
-  net/       # matrix, activations, layer, mlp
-  data/      # dataset generators
-  ui/        # Lit playground, canvas, loss chart
+  maze/      # generation, movement, types
+  rl/        # tabular Q-learning agent
+  ui/        # Lit playground + maze canvas
   styles/    # theme
 .github/workflows/
   verify-main.yml

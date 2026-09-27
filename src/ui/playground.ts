@@ -93,10 +93,16 @@ export class LpPlayground extends LitElement {
             <option value="15">15 × 15</option>
             <option value="21">21 × 21</option>
             <option value="31">31 × 31</option>
+            <option value="41">41 × 41</option>
+            <option value="51">51 × 51</option>
+            <option value="65">65 × 65 (the “64 × 64” maze)</option>
           </select>
           <button type="button" @click=${this.onNewMaze}>New maze</button>
         </div>
-        <div class="note" style="margin-top:6px">Click any open cell in the maze to move the start.</div>
+        <div class="note" style="margin-top:6px">
+          Sizes count grid squares including walls, so they are odd (65 × 65 = 32 × 32 rooms).
+          Click any open cell in the maze to move the start.
+        </div>
       </div>
     `;
   }

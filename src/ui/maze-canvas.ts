@@ -62,7 +62,9 @@ export class LpMazeCanvas extends LitElement {
     }
     .wrap {
       position: relative;
-      width: 100%;
+      width: min(100%, calc(100vh - 32px));
+      min-width: 240px;
+      margin: 0 auto;
       aspect-ratio: 1;
       background: var(--lp-panel, #101827);
       border: 1px solid var(--lp-border, #2a3b55);
@@ -129,11 +131,11 @@ export class LpMazeCanvas extends LitElement {
   updated(changed: PropertyValues<this>): void {
     if (!this.baseEl) return;
     const resized = this.syncSize();
-    const baseKeys = ["maze", "agent", "start", "heatmap", "heatmapMax", "showHeatmap"] as const;
+    const baseKeys = ["maze", "start", "heatmap", "heatmapMax", "showHeatmap"] as const;
     if (resized || baseKeys.some((k) => changed.has(k))) this.drawBase();
     const gaChanged = changed.has("ga") || changed.has("gaStep") || changed.has("maze");
     if (resized || gaChanged) this.drawTrails(resized || changed.has("maze"));
-    if (resized || gaChanged || changed.has("gaHighlight")) this.drawSprites();
+    if (resized || gaChanged || changed.has("gaHighlight") || changed.has("agent")) this.drawSprites();
   }
 
   private redrawAll(): void {
@@ -164,12 +166,11 @@ export class LpMazeCanvas extends LitElement {
   private onClick = (ev: MouseEvent): void => {
     if (!this.maze || !this.baseEl) return;
     const rect = this.baseEl.getBoundingClientRect();
-    const x = ev.clientX - rect.left;
-    const y = ev.clientY - rect.top;
-    const cellW = rect.width / this.maze.cols;
-    const cellH = rect.height / this.maze.rows;
-    const col = Math.floor(x / cellW);
-    const row = Math.floor(y / cellH);
+    const scale = this.pixelSize / Math.max(1, rect.width);
+    const off = this.offset();
+    const cell = this.cellSize();
+    const col = Math.floor(((ev.clientX - rect.left) * scale - off) / cell);
+    const row = Math.floor(((ev.clientY - rect.top) * scale - off) / cell);
     const pos: Position = { row, col };
     if (!isOpen(this.maze, pos)) return;
     if (isExit(this.maze, pos)) return;
@@ -182,8 +183,22 @@ export class LpMazeCanvas extends LitElement {
     );
   };
 
+  /** Whole-pixel cell size so walls and corridors stay crisp at any maze size. */
   private cellSize(): number {
-    return this.maze ? this.pixelSize / this.maze.cols : 1;
+    return this.maze ? Math.max(1, Math.floor(this.pixelSize / this.maze.cols)) : 1;
+  }
+
+  /** Margin (device px) that centres the whole-pixel grid inside the canvas. */
+  private offset(): number {
+    return this.maze ? Math.floor((this.pixelSize - this.cellSize() * this.maze.cols) / 2) : 0;
+  }
+
+  /** Clear a layer and set its transform so (0,0) is the maze's top-left corner. */
+  private prepare(ctx: CanvasRenderingContext2D): void {
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+    const off = this.offset();
+    ctx.setTransform(1, 0, 0, 1, off, off);
   }
 
   private drawBase(): void {
@@ -196,9 +211,12 @@ export class LpMazeCanvas extends LitElement {
     const { maze } = this;
     const cell = this.cellSize();
 
-    // Floor
-    ctx.fillStyle = getComputedStyle(this).getPropertyValue("--lp-panel").trim() || "#101827";
+    // Margin around the whole-pixel grid is drawn as wall.
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = "#0a1220";
     ctx.fillRect(0, 0, size, size);
+    const off = this.offset();
+    ctx.setTransform(1, 0, 0, 1, off, off);
 
     const heatMax = Math.max(1e-6, this.heatmapMax);
 
@@ -210,13 +228,13 @@ export class LpMazeCanvas extends LitElement {
 
         if (maze.walls[i]) {
           ctx.fillStyle = "#0a1220";
-          ctx.fillRect(x, y, cell + 0.5, cell + 0.5);
+          ctx.fillRect(x, y, cell, cell);
           continue;
         }
 
         // Open cell base
         ctx.fillStyle = "#152238";
-        ctx.fillRect(x, y, cell + 0.5, cell + 0.5);
+        ctx.fillRect(x, y, cell, cell);
 
         // Heatmap: max Q → blue→cyan→yellow
         if (this.showHeatmap && this.heatmap) {
@@ -225,7 +243,7 @@ export class LpMazeCanvas extends LitElement {
             const t = Math.min(1, v / heatMax);
             ctx.fillStyle = heatColor(t);
             ctx.globalAlpha = 0.35 + 0.45 * t;
-            ctx.fillRect(x, y, cell + 0.5, cell + 0.5);
+            ctx.fillRect(x, y, cell, cell);
             ctx.globalAlpha = 1;
           }
         }
@@ -240,10 +258,18 @@ export class LpMazeCanvas extends LitElement {
     ctx.roundRect(ex + cell * 0.15, ey + cell * 0.15, cell * 0.7, cell * 0.7, cell * 0.12);
     ctx.fill();
     ctx.fillStyle = "#062816";
-    ctx.font = `bold ${Math.max(10, cell * 0.45)}px system-ui,sans-serif`;
+    ctx.font = `bold ${Math.max(6, cell * 0.45)}px system-ui,sans-serif`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillText("E", ex + cell / 2, ey + cell / 2 + 1);
+    if (cell < 18) {
+      // Tiny cells (big mazes): add a ring so the exit is easy to spot.
+      ctx.strokeStyle = "rgba(61,214,140,0.85)";
+      ctx.lineWidth = Math.max(1.5, cell * 0.15);
+      ctx.beginPath();
+      ctx.arc(ex + cell / 2, ey + cell / 2, cell * 1.3, 0, Math.PI * 2);
+      ctx.stroke();
+    }
 
     // Start marker (subtle ring)
     if (this.start) {
@@ -253,24 +279,6 @@ export class LpMazeCanvas extends LitElement {
       ctx.lineWidth = Math.max(1.5, cell * 0.08);
       ctx.beginPath();
       ctx.arc(sx, sy, cell * 0.36, 0, Math.PI * 2);
-      ctx.stroke();
-    }
-
-    // Agent ball (Q-learning mode)
-    if (this.agent) {
-      const ax = this.agent.col * cell + cell / 2;
-      const ay = this.agent.row * cell + cell / 2;
-      const radius = cell * 0.28;
-      const grad = ctx.createRadialGradient(ax - radius * 0.3, ay - radius * 0.3, radius * 0.1, ax, ay, radius);
-      grad.addColorStop(0, "#c8e0ff");
-      grad.addColorStop(0.45, "#5b9dff");
-      grad.addColorStop(1, "#2a5fbf");
-      ctx.fillStyle = grad;
-      ctx.beginPath();
-      ctx.arc(ax, ay, radius, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = "rgba(255,255,255,0.35)";
-      ctx.lineWidth = Math.max(1, cell * 0.04);
       ctx.stroke();
     }
   }
@@ -293,15 +301,18 @@ export class LpMazeCanvas extends LitElement {
     if (!ctx) return;
     const ga = this.ga;
     if (!ga || !this.maze) {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      this.prepare(ctx);
       this.drawnGaId = -1;
       this.drawnStep = 0;
       return;
     }
     let from = this.drawnStep;
     if (full || ga.id !== this.drawnGaId || this.gaStep < this.drawnStep) {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      this.prepare(ctx);
       from = 0;
+    } else {
+      const off = this.offset();
+      ctx.setTransform(1, 0, 0, 1, off, off);
     }
     const to = Math.max(0, Math.floor(this.gaStep));
     this.drawnGaId = ga.id;
@@ -352,11 +363,13 @@ export class LpMazeCanvas extends LitElement {
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    const ga = this.ga;
-    if (!ga || !this.maze) return;
-
+    this.prepare(ctx);
+    if (!this.maze) return;
     const cell = this.cellSize();
+    if (this.agent) this.drawAgent(ctx, this.agent, cell);
+    const ga = this.ga;
+    if (!ga) return;
+
     const t = Math.max(0, Math.floor(this.gaStep));
     let atGoal = 0;
 
@@ -392,7 +405,7 @@ export class LpMazeCanvas extends LitElement {
       const [x, y] = this.walkerPoint(run.path[i]!, w);
       const stopped = t >= run.steps;
       if (stopped && run.end === "dead") {
-        drawCross(ctx, x, y, cell * 0.2, Math.max(1.5, cell * 0.08));
+        drawCross(ctx, x, y, Math.max(2.5, cell * 0.2), Math.max(1.5, cell * 0.08));
         continue;
       }
       if (stopped && run.end === "goal") {
@@ -402,7 +415,7 @@ export class LpMazeCanvas extends LitElement {
       const lives = run.lives[i] ?? ga.lives;
       const alpha = 0.25 + 0.75 * (lives / Math.max(1, ga.lives));
       ctx.beginPath();
-      ctx.arc(x, y, cell * 0.17, 0, Math.PI * 2);
+      ctx.arc(x, y, Math.max(2.5, cell * 0.17), 0, Math.PI * 2);
       if (stopped) {
         // Out of moves: hollow ring.
         ctx.strokeStyle = `rgba(200,210,225,${alpha.toFixed(3)})`;
@@ -448,16 +461,34 @@ export class LpMazeCanvas extends LitElement {
       const text =
         hi.end === "goal" ? `best: goal in ${hi.steps} · ♥${hi.livesLeft}` : `best · ♥${hi.livesLeft}`;
       ctx.font = `600 ${Math.max(11, cell * 0.48)}px system-ui,sans-serif`;
-      ctx.textAlign = x > this.pixelSize * 0.6 ? "right" : "left";
+      ctx.textAlign = x > cell * this.maze.cols * 0.6 ? "right" : "left";
       ctx.textBaseline = "top";
       const tx = x + (ctx.textAlign === "right" ? -cell * 0.4 : cell * 0.4);
-      const ty = Math.min(this.pixelSize - cell * 0.8, y + cell * 0.35);
+      const ty = Math.min(cell * (this.maze.rows - 0.8), y + cell * 0.35);
       ctx.lineWidth = Math.max(2, cell * 0.14);
       ctx.strokeStyle = "rgba(8,12,20,0.9)";
       ctx.strokeText(text, tx, ty);
       ctx.fillStyle = "#ffd666";
       ctx.fillText(text, tx, ty);
     }
+  }
+
+  /** The Q-learning ball (drawn on the sprite layer so the maze isn't redrawn every step). */
+  private drawAgent(ctx: CanvasRenderingContext2D, agent: Position, cell: number): void {
+    const ax = agent.col * cell + cell / 2;
+    const ay = agent.row * cell + cell / 2;
+    const radius = Math.max(4, cell * 0.28);
+    const grad = ctx.createRadialGradient(ax - radius * 0.3, ay - radius * 0.3, radius * 0.1, ax, ay, radius);
+    grad.addColorStop(0, "#c8e0ff");
+    grad.addColorStop(0.45, "#5b9dff");
+    grad.addColorStop(1, "#2a5fbf");
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(ax, ay, radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,0.35)";
+    ctx.lineWidth = Math.max(1, cell * 0.04);
+    ctx.stroke();
   }
 
   render() {

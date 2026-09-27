@@ -25,7 +25,8 @@ export const SPEED_LEVELS: SpeedLevel[] = [
   { label: "120 steps/s", sps: 120, pauseMs: 800 },
   { label: "300 steps/s", sps: 300, pauseMs: 550 },
   { label: "800 steps/s", sps: 800, pauseMs: 350 },
-  { label: "Max (1 generation / frame)", sps: Infinity, pauseMs: 120 }
+  { label: "Max (1 generation / frame)", sps: Infinity, pauseMs: 120 },
+  { label: "Turbo (1 gen / frame, no pause)", sps: Infinity, pauseMs: 0 }
 ];
 const DEFAULT_SPEED = 5;
 
@@ -226,6 +227,8 @@ export class LpGaMode extends LitElement {
       if (this.step >= this.maxT) this.finishGeneration(now);
     } else if (now >= this.highlightUntil) {
       this.nextGeneration();
+      // At "1 generation per frame" speeds, show the new generation's final trails right away.
+      if (!Number.isFinite(SPEED_LEVELS[this.speedLevel]!.sps)) this.finishGeneration(now);
     }
     this.rafId = requestAnimationFrame(this.tick);
   };
@@ -459,7 +462,9 @@ export class LpGaMode extends LitElement {
             <strong>Breeding:</strong> the top ${DEFAULT_GA_CONFIG.eliteCount} genomes are copied
             unchanged; the rest come from tournament selection (best of
             ${DEFAULT_GA_CONFIG.tournamentSize}), single-point crossover and per-gene mutation. Each
-            child also re-rolls the move where its parent got stuck (<em>frontier mutation</em>), so
+            child also re-rolls the move where its parent got stuck plus the next
+            ${DEFAULT_GA_CONFIG.frontierReroll} moves (<em>frontier mutation</em>), and half the
+            children delete one of the parent's wall-hitting moves (<em>wall-hit repair</em>), so
             evolution keeps probing the dead end instead of waiting for a lucky mutation.
             Click any open cell to move the start.
           </div>

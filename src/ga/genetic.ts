@@ -1,7 +1,7 @@
 import { bfsDistances, maxDistance } from "../maze/distance.js";
 import { indexOf, type Action, type Maze, type Position } from "../maze/types.js";
 import { DEFAULT_FITNESS_WEIGHTS, fitness, type FitnessContext, type FitnessWeights } from "./fitness.js";
-import { DEFAULT_LIVES, runWalker, type Genome, type WalkerRun } from "./walker.js";
+import { DEFAULT_LIVES, createWalkContext, runWalker, type Genome, type WalkContext, type WalkerRun } from "./walker.js";
 
 export type CrossoverKind = "single-point" | "uniform";
 
@@ -22,6 +22,13 @@ export interface GaConfig {
    * that reached the goal are left alone.
    */
   frontierRate: number;
+  /** After a frontier mutation, also re-randomise this many genes after the stuck point. */
+  frontierReroll: number;
+  /**
+   * Probability that a child deletes one gene that made its first parent hit a wall
+   * (later genes shift one step earlier, a random move is appended to keep the length).
+   */
+  repairRate: number;
   genomeMultiplier: number;
   minGenomeLength: number;
   lives: number;
@@ -34,6 +41,8 @@ export const DEFAULT_GA_CONFIG: GaConfig = {
   tournamentSize: 5,
   crossover: "single-point",
   frontierRate: 1,
+  frontierReroll: 10,
+  repairRate: 0.5,
   genomeMultiplier: 2,
   minGenomeLength: 20,
   lives: DEFAULT_LIVES
@@ -81,6 +90,14 @@ export function mutate(genome: ReadonlyArray<Action>, rate: number, rng: Rng = M
   return out;
 }
 
+/** Remove gene `index` (later genes move one step earlier) and append a random move. */
+export function deleteGene(genome: ReadonlyArray<Action>, index: number, rng: Rng = Math.random): Genome {
+  if (index < 0 || index >= genome.length) return genome.slice();
+  const out = genome.slice(0, index).concat(genome.slice(index + 1));
+  out.push(randomAction(rng));
+  return out;
+}
+
 /** Index of the fittest of `k` randomly drawn individuals. */
 export function tournamentSelect(fitnesses: ReadonlyArray<number>, k: number, rng: Rng = Math.random): number {
   let best = Math.floor(rng() * fitnesses.length);
@@ -104,13 +121,15 @@ export function nextGeneration(
   genomes: ReadonlyArray<Genome>,
   fitnesses: ReadonlyArray<number>,
   config: Pick<GaConfig, "populationSize" | "mutationRate" | "eliteCount" | "tournamentSize" | "crossover"> &
-    Partial<Pick<GaConfig, "frontierRate">>,
+    Partial<Pick<GaConfig, "frontierRate" | "frontierReroll" | "repairRate">>,
   rng: Rng = Math.random,
   /**
    * Per genome: index of the gene where it got stuck (its last move), or -1 to skip
    * (e.g. it reached the goal). Enables frontier mutation.
    */
-  frontierGenes?: ReadonlyArray<number>
+  frontierGenes?: ReadonlyArray<number>,
+  /** Per genome: indices of the genes that hit a wall (enables wall-hit repair). */
+  bumpGenes?: ReadonlyArray<ReadonlyArray<number>>
 ): Genome[] {
   const order = rankIndices(fitnesses);
   const next: Genome[] = [];
@@ -120,10 +139,17 @@ export function nextGeneration(
     const ia = tournamentSelect(fitnesses, config.tournamentSize, rng);
     const pa = genomes[ia]!;
     const pb = genomes[tournamentSelect(fitnesses, config.tournamentSize, rng)]!;
-    const child = mutate(crossover(pa, pb, rng, config.crossover), config.mutationRate, rng);
+    let child = mutate(crossover(pa, pb, rng, config.crossover), config.mutationRate, rng);
+    const bumps = bumpGenes?.[ia];
+    if (bumps && bumps.length > 0 && config.repairRate && rng() < config.repairRate) {
+      const gi = bumps[Math.floor(rng() * bumps.length)]!;
+      child = deleteGene(child, gi, rng);
+    }
     const fg = frontierGenes?.[ia] ?? -1;
     if (fg >= 0 && fg < child.length && config.frontierRate && rng() < config.frontierRate) {
       child[fg] = ((child[fg]! + 1 + Math.min(2, Math.floor(rng() * 3))) % 4) as Action;
+      const k = config.frontierReroll ?? 0;
+      for (let i = fg + 1; i < Math.min(child.length, fg + 1 + k); i++) child[i] = randomAction(rng);
     }
     next.push(child);
   }
@@ -170,6 +196,7 @@ export class GeneticSolver {
   firstSolvedGeneration: number | null = null;
 
   private readonly rng: Rng;
+  private readonly walkContext: WalkContext;
 
   constructor(
     maze: Maze,
@@ -183,6 +210,7 @@ export class GeneticSolver {
     this.config = { ...DEFAULT_GA_CONFIG, ...config };
     this.weights = weights;
     this.rng = rng;
+    this.walkContext = createWalkContext(maze);
     this.distToGoal = bfsDistances(maze, maze.exit);
     this.maxDist = maxDistance(this.distToGoal);
     this.shortestPath = this.distToGoal[indexOf(maze, start)] ?? -1;
@@ -204,7 +232,7 @@ export class GeneticSolver {
   /** Walk every genome and score it. Returns this generation's stats. */
   evaluate(): GenerationStats {
     const ctx = this.fitnessContext;
-    this.runs = this.genomes.map((g) => runWalker(this.maze, this.start, g, this.config.lives));
+    this.runs = this.genomes.map((g) => runWalker(this.maze, this.start, g, this.config.lives, this.walkContext));
     this.fitnesses = this.runs.map((r) => fitness(r, ctx, this.weights));
     let sum = 0;
     let bestIndex = 0;
@@ -248,7 +276,8 @@ export class GeneticSolver {
       this.fitnesses,
       this.config,
       this.rng,
-      this.runs.map((r) => (r.end === "goal" ? -1 : r.steps - 1))
+      this.runs.map((r) => (r.end === "goal" ? -1 : r.steps - 1)),
+      this.runs.map((r) => r.bumps.map((b) => b.step - 1))
     );
     this.generation += 1;
     this.runs = [];

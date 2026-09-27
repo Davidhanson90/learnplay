@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { mazeFromLayout } from "../maze/generate.js";
 import { indexOf, type Action } from "../maze/types.js";
-import { DEFAULT_LIVES, positionAt, runWalker } from "./walker.js";
+import { DEFAULT_LIVES, createWalkContext, positionAt, runWalker } from "./walker.js";
 
 const N: Action = 0;
 const E: Action = 1;
@@ -24,8 +24,8 @@ describe("runWalker", () => {
 
   it("loses one point per wall hit and stays in place", () => {
     const run = runWalker(CORRIDOR, START, [N, E, S, W, E]);
-    expect(run.path).toEqual([cell(1, 1), cell(1, 1), cell(1, 2), cell(1, 2), cell(1, 1), cell(1, 2)]);
-    expect(run.lives).toEqual([10, 9, 9, 8, 8, 8]);
+    expect(Array.from(run.path)).toEqual([cell(1, 1), cell(1, 1), cell(1, 2), cell(1, 2), cell(1, 1), cell(1, 2)]);
+    expect(Array.from(run.lives)).toEqual([10, 9, 9, 8, 8, 8]);
     expect(run.livesLeft).toBe(8);
     expect(run.bumps.map((b) => b.step)).toEqual([1, 3]);
     expect(run.bumps[0]).toEqual({ step: 1, cell: cell(1, 1), action: N });
@@ -67,8 +67,35 @@ describe("runWalker", () => {
   it("treats moving off the grid as a wall hit", () => {
     const open = mazeFromLayout(["..", ".E"]);
     const run = runWalker(open, { row: 0, col: 0 }, [N, W, S]);
-    expect(run.lives).toEqual([10, 9, 8, 8]);
+    expect(Array.from(run.lives)).toEqual([10, 9, 8, 8]);
     expect(run.path.at(-1)).toBe(indexOf(open, { row: 1, col: 0 }));
+  });
+
+  it("gives identical results with a reusable walk context", () => {
+    const ctx = createWalkContext(CORRIDOR);
+    expect(ctx.next[cell(1, 1) * 4 + N]).toBe(-1);
+    expect(ctx.next[cell(1, 1) * 4 + E]).toBe(cell(1, 2));
+    const genome: Action[] = [E, W, E, N, E, E, E];
+    const a = runWalker(CORRIDOR, START, genome, 10, ctx);
+    const b = runWalker(CORRIDOR, START, genome, 10, ctx);
+    const c = runWalker(CORRIDOR, START, genome);
+    for (const r of [b, c]) {
+      expect(Array.from(r.path)).toEqual(Array.from(a.path));
+      expect(r.revisits).toBe(a.revisits);
+      expect(r.end).toBe("goal");
+    }
+    expect(a.revisits).toBe(2);
+    // A context for another maze is ignored rather than misused.
+    const other = createWalkContext(mazeFromLayout(["###", "#E#", "###"]));
+    expect(runWalker(CORRIDOR, START, genome, 10, other).end).toBe("goal");
+  });
+
+  it("recovers when the visited-stamp counter wraps", () => {
+    const ctx = createWalkContext(CORRIDOR);
+    ctx.stampId = 0xffffffff;
+    const run = runWalker(CORRIDOR, START, [E, W, E], 10, ctx);
+    expect(run.revisits).toBe(2);
+    expect(ctx.stampId).toBe(1);
   });
 
   it("reports clamped positions for animation", () => {

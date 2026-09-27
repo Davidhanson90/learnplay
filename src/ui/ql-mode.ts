@@ -225,9 +225,7 @@ export class LpQlMode extends LitElement {
       }
     }
     this.syncStats();
-    if (this.episodeSteps % 8 === 0) {
-      this.rebuildHeatmap();
-    }
+    this.rebuildHeatmap();
     this.requestUpdate();
   }
 
@@ -397,7 +395,7 @@ export class LpQlMode extends LitElement {
           <input
             type="range"
             min="1"
-            max="40"
+            max="400"
             step="1"
             .value=${String(this.speed)}
             @input=${this.onSpeed}

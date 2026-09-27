@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.0 — 2026-09-27
+
+- **Bigger mazes:** 41 × 41, 51 × 51 and 65 × 65 (the “64 × 64” request; sizes count grid squares including walls, so they must be odd — 65 × 65 is 32 × 32 rooms)
+- Maze canvas uses whole-pixel cells (crisp on hi-DPI), fits the viewport height, and keeps markers / exit visible when cells are tiny
+- Q-learning ball moved to the sprite layer so the maze isn't redrawn every step; Q-learning speed slider now goes to 400 steps/frame
+- GA walker simulation rewritten with typed arrays and a precomputed move table (no per-step allocation)
+- New **Turbo** speed: one generation per frame with no highlight pause (each generation's final trails still drawn)
+- GA: frontier mutation now also re-rolls the 10 moves after the stuck point, and half the children delete one of the parent's wall-hitting moves (“wall-hit repair”) — needed for big mazes
+
 ## 0.3.0 — 2026-09-27
 
 - **Genetic algorithm is now the default mode.** A population (default 100) of fixed-length move genomes walks the maze in lock-step; every walker leaves a semi-transparent trail, wall hits show as red ticks, dead walkers get an ✕, finishers glow at the exit

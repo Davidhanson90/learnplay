@@ -6,6 +6,7 @@ import {
   GeneticSolver,
   crossover,
   defaultGenomeLength,
+  deleteGene,
   mutate,
   nextGeneration,
   randomGenome,
@@ -134,6 +135,51 @@ describe("genetic operators", () => {
     expect(skipped.every((c) => c.every((g) => g === 1))).toBe(true);
   });
 
+  it("frontier re-roll randomises the genes right after the stuck point", () => {
+    const parent: Genome = new Array<Action>(40).fill(1);
+    const next = nextGeneration(
+      [parent],
+      [1],
+      { populationSize: 30, eliteCount: 0, tournamentSize: 1, mutationRate: 0, crossover: "single-point", frontierRate: 1, frontierReroll: 5 },
+      lcg(21),
+      [10]
+    );
+    let rerolledChanged = 0;
+    for (const child of next) {
+      expect(child).toHaveLength(40);
+      expect(child[10]).not.toBe(1);
+      expect(child.slice(0, 10).every((g) => g === 1)).toBe(true);
+      expect(child.slice(16).every((g) => g === 1)).toBe(true);
+      rerolledChanged += child.slice(11, 16).filter((g) => g !== 1).length;
+    }
+    expect(rerolledChanged).toBeGreaterThan(50);
+  });
+
+  it("deleteGene removes one gene, shifts the rest and keeps the length", () => {
+    const g: Genome = [0, 1, 2, 3, 0, 1];
+    const out = deleteGene(g, 2, () => 0.99);
+    expect(out).toEqual([0, 1, 3, 0, 1, 3]);
+    expect(deleteGene(g, -1)).toEqual(g);
+    expect(deleteGene(g, 99)).toEqual(g);
+  });
+
+  it("wall-hit repair deletes a gene that hit a wall, leaving the path otherwise intact", () => {
+    const parent: Genome = [1, 0, 1, 1, 2, 2];
+    const next = nextGeneration(
+      [parent],
+      [1],
+      { populationSize: 5, eliteCount: 1, tournamentSize: 1, mutationRate: 0, crossover: "single-point", repairRate: 1 },
+      lcg(22),
+      undefined,
+      [[1]]
+    );
+    expect(next[0]).toEqual(parent);
+    for (const child of next.slice(1)) {
+      expect(child).toHaveLength(6);
+      expect(child.slice(0, 5)).toEqual([1, 1, 1, 2, 2]);
+    }
+  });
+
   it("sizes genomes from the shortest path", () => {
     expect(defaultGenomeLength(50, 2, 20)).toBe(100);
     expect(defaultGenomeLength(3, 2, 20)).toBe(20);
@@ -193,6 +239,19 @@ describe("GeneticSolver", () => {
     const last = solver.history.at(-1)!;
     expect(last.reached).toBeGreaterThan(0);
     expect(last.bestSteps).not.toBeNull();
+  });
+
+  it("makes steady progress on a large 65×65 maze", () => {
+    const maze = generateMaze({ size: 65, random: lcg(2000) });
+    const solver = new GeneticSolver(maze, { row: 1, col: 1 }, {}, lcg(3));
+    const startBest = solver.evaluate().best;
+    for (let g = 0; g < 60; g++) {
+      solver.evolve();
+      solver.evaluate();
+    }
+    const last = solver.history.at(-1)!;
+    expect(solver.genomeLength).toBe(solver.shortestPath * 2);
+    expect(last.best).toBeGreaterThan(startBest);
   });
 
   it("handles a start sitting on the goal", () => {

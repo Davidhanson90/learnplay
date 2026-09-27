@@ -26,9 +26,15 @@ fitness   = 100 · closeness
 
 True maze distance matters: straight-line distance would reward walkers that get stuck on the far side of a wall next to the exit.
 
-**Breeding:** top 4 genomes copied unchanged (elitism); parents chosen by tournament (best of 5); single-point crossover; per-gene mutation (default 0.2 % per gene); plus a *frontier mutation* — each child re-rolls the move where its first parent got stuck (the wall hit that killed it, or its last move). Without that, a lineage that has spent all 10 points in its prefix can only progress when a random mutation happens to land on exactly that gene, and in testing 21×21 runs then typically needed several hundred generations or didn't solve within 1,000. With it, the median over 10 random 21×21 mazes was 76 generations to the first walker reaching the exit.
+**Breeding:** top 4 genomes copied unchanged (elitism); parents chosen by tournament (best of 5); single-point crossover; per-gene mutation (default 0.2 % per gene); plus a *frontier mutation* — each child re-rolls the move where its first parent got stuck (the wall hit that killed it, or its last move) and re-randomises the 10 moves after it; and *wall-hit repair* — half the children delete one move that made their parent hit a wall (later moves shift one step earlier, so the path is unchanged but a point is saved). Without that, a lineage that has spent all 10 points in its prefix can only progress when a random mutation happens to land on exactly that gene, and in testing 21×21 runs then typically needed several hundred generations or didn't solve within 1,000. With it, the median over 10 random 21×21 mazes was 76 generations to the first walker reaching the exit.
 
 Controls: **Train / Pause / Step gen / Reset**, speed (2 steps/s up to one whole generation per frame), population size, mutation rate, genome length, and trail colouring (a hue per walker, or red→green by fitness). Stats show the generation, live moving / reached / died / out-of-moves counts, best & average fitness, first solved generation, and a fitness-over-generations chart.
+
+## Maze sizes
+
+11, 15, 21 (default), 31, 41, 51 and 65. Sizes count **grid squares including the walls**, and the recursive-backtracker layout needs an odd number of squares so every side has a border wall. The “64 × 64” maze is therefore **65 × 65** squares (32 × 32 rooms joined by corridors). The canvas uses whole-pixel cells so big mazes stay crisp and fits within the viewport height.
+
+Speeds go up to **Turbo** (one generation per animation frame, no highlight pause), which is the mode to use on 51 / 65 mazes.
 
 ## Q-learning mode
 

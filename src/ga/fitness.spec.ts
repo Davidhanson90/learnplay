@@ -19,8 +19,8 @@ const ctx: FitnessContext = { distToGoal: dist, maxDist: maxDistance(dist), geno
 function endingAt(row: number, col: number, extra: Partial<WalkerRun> = {}): WalkerRun {
   const c = indexOf(U_MAZE, { row, col });
   return {
-    path: [c],
-    lives: [10],
+    path: Int32Array.of(c),
+    lives: Uint8Array.of(10),
     bumps: [],
     end: "moves",
     steps: 5,

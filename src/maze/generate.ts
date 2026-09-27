@@ -124,32 +124,34 @@ export function listOpenCells(maze: Maze): Position[] {
   return cells;
 }
 
-/** Build a tiny fixed maze for deterministic Q-learning tests. */
-export function createFixedTestMaze(): Maze {
-  // 5x5: border walls, open cross corridor to exit at (3,3)
-  // # # # # #
-  // # . . . #
-  // # . # . #
-  // # . . E #
-  // # # # # #
-  const rows = 5;
-  const cols = 5;
-  const layout = [
-    "#####",
-    "#...#",
-    "#.#.#",
-    "#..E#",
-    "#####"
-  ];
+/**
+ * Build a maze from ASCII rows: `#` = wall, `E` = exit, anything else = open.
+ * Handy for deterministic tests.
+ */
+export function mazeFromLayout(layout: ReadonlyArray<string>): Maze {
+  const rows = layout.length;
+  const cols = layout[0]?.length ?? 0;
   const walls = new Array<boolean>(rows * cols);
-  let exit: Position = { row: 3, col: 3 };
+  let exit: Position = { row: rows - 2, col: cols - 2 };
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
-      const ch = layout[r]![c]!;
+      const ch = layout[r]![c] ?? "#";
       walls[r * cols + c] = ch === "#";
       if (ch === "E") exit = { row: r, col: c };
     }
   }
   walls[exit.row * cols + exit.col] = false;
   return { rows, cols, walls, exit };
+}
+
+/** Build a tiny fixed maze for deterministic Q-learning tests. */
+export function createFixedTestMaze(): Maze {
+  // 5x5: border walls, open cross corridor to exit at (3,3)
+  return mazeFromLayout([
+    "#####",
+    "#...#",
+    "#.#.#",
+    "#..E#",
+    "#####"
+  ]);
 }

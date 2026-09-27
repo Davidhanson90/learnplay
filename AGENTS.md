@@ -11,13 +11,14 @@ This repository is a **demo app** (not an npm library).
 ## Rules
 
 1. Do not edit `dist/` directly.
-2. Keep learning pure TypeScript — tabular Q-learning only (no TF.js / remote RL APIs / A* as the “learning” demo).
-3. Preserve Lit custom element tags `lp-playground` and `lp-maze-canvas` unless intentionally changing API.
+2. Keep learning pure TypeScript — the from-scratch **genetic algorithm** (default mode, `src/ga/`) and **tabular Q-learning** (`src/rl/`) only (no TF.js / remote RL APIs / A* as the “learning” demo). BFS is used only to score GA fitness by true maze distance.
+3. Preserve Lit custom element tags `lp-playground` and `lp-maze-canvas` unless intentionally changing API. Mode views are `lp-ga-mode` and `lp-ql-mode`; the chart is `lp-fitness-chart`.
 4. Vite `base` must stay `/learnplay/` so GitHub Pages works at `https://davidhanson90.github.io/learnplay/`.
 5. Run `npm run build:verify` before proposing completion.
-6. New maze or new start click should **reset the Q-table** so learning is visible from scratch.
+6. New maze or new start click should **reset learning** (fresh GA population / cleared Q-table) so learning is visible from scratch.
+7. GA rules the user asked for: every walker has **10 points**; a wall hit (or leaving the grid) costs 1 point and the walker stays put; at 0 it dies. Walkers stop on the goal. All walkers of a generation are animated together with trails; the maze clears for the next generation.
 
 ## Coverage
 
-- Vitest coverage thresholds apply to `src/maze/**` and `src/rl/**`.
+- Vitest coverage thresholds apply to `src/maze/**`, `src/rl/**` and `src/ga/**`.
 - Lit UI under `src/ui/**` is excluded from coverage thresholds.

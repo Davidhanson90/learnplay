@@ -8,8 +8,8 @@ export default defineConfig({
       provider: "v8",
       reporter: ["text", "html", "json-summary"],
       reportsDirectory: "coverage",
-      include: ["src/maze/**/*.ts", "src/rl/**/*.ts"],
-      exclude: ["src/**/*.spec.ts", "src/**/*.test.ts", "src/maze/index.ts", "src/rl/index.ts"],
+      include: ["src/maze/**/*.ts", "src/rl/**/*.ts", "src/ga/**/*.ts"],
+      exclude: ["src/**/*.spec.ts", "src/**/*.test.ts", "src/maze/index.ts", "src/rl/index.ts", "src/ga/index.ts"],
       thresholds: {
         perFile: true,
         statements: 85,
